@@ -12,7 +12,6 @@ export default async function handler(req, res) {
 
     const apiKey = process.env.GEMINI_API_KEY;
 
-    // Check if API key exists in Vercel
     if (!apiKey) {
       return res.status(500).json({ 
         error: "API key missing! Go to Vercel → Settings → Environment Variables → Add GEMINI_API_KEY" 
@@ -35,24 +34,26 @@ Rules:
 
 Student question: ${question}`;
 
-    // Try different model + version combinations
-    const attempts = [
-      { version: "v1beta", model: "gemini-2.0-flash" },
-      { version: "v1beta", model: "gemini-1.5-flash" },
-      { version: "v1beta", model: "gemini-1.5-flash-latest" },
-      { version: "v1beta", model: "gemini-1.5-flash-8b" },
-      { version: "v1beta", model: "gemini-pro" },
-      { version: "v1", model: "gemini-pro" },
-      { version: "v1", model: "gemini-1.5-flash" },
+    // Updated 2025/2026 models - newest first
+    const models = [
+      "gemini-2.5-flash",
+      "gemini-3-flash-preview",
+      "gemini-2.0-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash-lite",
     ];
 
-    for (const attempt of attempts) {
+    for (const model of models) {
       try {
-        const url = `https://generativelanguage.googleapis.com/${attempt.version}/models/${attempt.model}:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
         
         const response = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            // KEY IS NOW SENT IN HEADER (new Google requirement!)
+            "x-goog-api-key": apiKey
+          },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
@@ -64,14 +65,20 @@ Student question: ${question}`;
 
         const data = await response.json();
 
-        // Check for invalid API key specifically
-        if (data.error?.status === "UNAUTHENTICATED" || data.error?.status === "PERMISSION_DENIED") {
+        // Invalid API key
+        if (data.error?.status === "UNAUTHENTICATED" || 
+            data.error?.status === "PERMISSION_DENIED") {
           return res.status(401).json({ 
-            error: "Invalid API key! Check your key in Vercel Environment Variables!" 
+            error: "Invalid API key! Please check your key in Vercel Environment Variables is correct and not expired!" 
           });
         }
 
-        // If this model works, return the answer
+        // Model not found - try next one
+        if (data.error?.status === "NOT_FOUND") {
+          continue;
+        }
+
+        // Success!
         if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
           return res.status(200).json({ 
             answer: data.candidates[0].content.parts[0].text 
@@ -79,13 +86,12 @@ Student question: ${question}`;
         }
 
       } catch (e) {
-        continue; // Try next model
+        continue;
       }
     }
 
-    // All models failed
     return res.status(500).json({ 
-      error: "All AI models failed. Please check your API key in Vercel settings is correct!" 
+      error: "Could not connect to AI. Please check your API key is valid!" 
     });
 
   } catch (error) {
