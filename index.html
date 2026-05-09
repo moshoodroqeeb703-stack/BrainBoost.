@@ -66,7 +66,35 @@ const DB = {
 // ══════════════════════════════════════
 // CALL OUR SAFE SERVER (No key exposed!)
 // ══════════════════════════════════════
+  
+// FREE IMAGE SEARCH - Wikipedia
+const searchImage = async (query) => {
+  try {
+    const search = query.replace(/diagram|picture|image|show me|draw|of/gi,"").trim();
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(search)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.thumbnail?.source) {
+      return data.thumbnail.source;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
 
+// Check if user wants an image
+const wantsImage = (question) => {
+  const q = question.toLowerCase();
+  return q.includes("diagram") ||
+         q.includes("picture") ||
+         q.includes("image") ||
+         q.includes("show me") ||
+         q.includes("draw") ||
+         q.includes("photo") ||
+         q.includes("what does") ||
+         q.includes("look like");
+};
 const askAI = async (question) => {
   try {
     const response = await fetch("/api/chat", {
@@ -273,9 +301,15 @@ function AuthPage({ mode, onAuth, onSwitch, onBack }) {
 }
 
 function Chat({ user, onLogout }) {
-  const [messages, setMessages] = React.useState([
-    { role:"ai", text:`Hi ${user.name}! 👋\n\nI'm BrainBoost AI 🧠 Ask me ANYTHING!\n\n🔢 "Simplify √50 + √32"\n📐 "What is sin(45°)?"\n⚗️ "Balance H₂ + O₂ → H₂O"\n💻 "Python code for prime numbers"\n📝 "Essay on climate change"\n🔬 "Explain mitosis"\n🌍 "Causes of World War 2"\n\nAny subject, any topic, any level! 🚀` }
-  ]);
+  const chatKey = `bb_chat_${user.email}`;
+
+  const [messages, setMessages] = React.useState(()=>{
+    try {
+      const saved = localStorage.getItem(chatKey);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [{ role:"ai", text:`Hi ${user.name}! 👋\n\nI'm BrainBoost AI 🧠 Ask me ANYTHING!\n\n🔢 "Simplify √50 + √32"\n📐 "What is sin(45°)?"\n⚗️ "Balance H₂ + O₂ → H₂O"\n💻 "Python code for prime numbers"\n📝 "Essay on climate change"\n🔬 "Explain mitosis"\n🌍 "Causes of World War 2"\n\nAny subject, any topic, any level! 🚀` }];
+  });
   const [input, setInput] = React.useState("");
   const [dailyUsed, setDailyUsed] = React.useState(()=>DB.getDailyUsed(user.email));
   const [loading, setLoading] = React.useState(false);
@@ -289,6 +323,33 @@ function Chat({ user, onLogout }) {
   React.useEffect(()=>{ messagesEnd.current?.scrollIntoView({behavior:"smooth"}); },[messages,loading]);
 
   const handleSend = async () => {
+  if (!input.trim() || loading) return;
+  if (!isPro && remaining <= 0) { setShowPayment(true); return; }
+
+  const userMsg = input;
+  setMessages(prev=>[...prev, { role:"user", text:userMsg }]);
+  setInput("");
+  setLoading(true);
+
+  // Check if user wants image
+  let imageUrl = null;
+  if (wantsImage(userMsg)) {
+    imageUrl = await searchImage(userMsg);
+  }
+
+  const aiResponse = await askAI(userMsg);
+
+  // Add message with optional image
+  setMessages(prev=>[...prev, {
+    role:"ai",
+    text: aiResponse,
+    image: imageUrl
+  }]);
+
+  const n = DB.incDailyUsed(user.email);
+  setDailyUsed(n);
+  setLoading(false);
+};
     if (!input.trim()||loading) return;
     if (!isPro&&remaining<=0){setShowPayment(true);return;}
     const userMsg=input;
@@ -313,7 +374,11 @@ function Chat({ user, onLogout }) {
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           {!isPro&&<div onClick={()=>setShowPayment(true)} style={{ fontSize:12, color:remaining<=2?C.gold:C.sub, fontWeight:700, padding:"5px 10px", background:remaining<=2?`${C.gold}15`:"rgba(124,58,237,0.08)", borderRadius:8, cursor:"pointer" }}>{remaining} left</div>}
           {!isPro&&<Btn variant="ghost" sm onClick={()=>setShowPayment(true)}>Upgrade 💎</Btn>}
-          <Btn variant="muted" sm onClick={onLogout}>Out</Btn>
+          <Btn variant="muted" sm onClick={()=>{
+  localStorage.removeItem(chatKey);
+  setMessages([{ role:"ai", text:`Hi ${user.name}! Chat cleared! Ask me anything 🧠` }]);
+}}>Clear</Btn>
+<Btn variant="muted" sm onClick={onLogout}>Out</Btn>
         </div>
       </nav>
       <div style={{ flex:1, overflowY:"auto", padding:"16px", maxWidth:860, margin:"0 auto", width:"100%" }}>
@@ -326,8 +391,25 @@ function Chat({ user, onLogout }) {
             ):(
               <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                 <div style={{ width:34, height:34, background:"linear-gradient(135deg,#7C3AED,#F59E0B)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🧠</div>
-                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 16px 16px 16px", padding:"12px 16px", maxWidth:"82%", fontSize:14, lineHeight:1.75, whiteSpace:"pre-wrap", wordWrap:"break-word", color:C.text }}>{msg.text}</div>
-              </div>
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 16px 16px 16px", padding:"12px 16px", maxWidth:"82%", fontSize:14, lineHeight:1.75, whiteSpace:"pre-wrap", wordWrap:"break-word", color:C.text }}>
+  {msg.image && (
+    <div style={{ marginBottom:12 }}>
+      <img 
+        src={msg.image} 
+        alt="diagram"
+        style={{ 
+          width:"100%", 
+          maxWidth:300, 
+          borderRadius:12, 
+          border:`1px solid ${C.border}`,
+          display:"block"
+        }}
+        onError={e=>e.target.style.display="none"}
+      />
+    </div>
+  )}
+  {msg.text}
+</div>              </div>
             )}
           </div>
         ))}
