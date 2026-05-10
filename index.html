@@ -38,11 +38,8 @@ const FLW = {
 };
 
 // ══════════════════════════════════════
-// NO API KEY HERE! KEY IS HIDDEN ON SERVER!
-// The key is stored safely in Vercel
-// Nobody can steal it! ✅
+// PERSISTENT STORAGE
 // ══════════════════════════════════════
-
 const DB = {
   getUsers:()=>{ try{ return JSON.parse(localStorage.getItem("bb_users")||"{}"); }catch{return {};} },
   saveUser:(email,data)=>{ try{ const u=DB.getUsers(); u[email.toLowerCase()]=data; localStorage.setItem("bb_users",JSON.stringify(u)); }catch{} },
@@ -61,65 +58,122 @@ const DB = {
       localStorage.setItem(k,n); return n;
     }catch{return 0;}
   },
+  getMessages:(email)=>{
+    try{ return JSON.parse(localStorage.getItem(`bb_msgs_${email}`)||"null"); }catch{return null;}
+  },
+  saveMessages:(email,msgs)=>{
+    try{ localStorage.setItem(`bb_msgs_${email}`,JSON.stringify(msgs.slice(-50))); }catch{}
+  },
 };
 
 // ══════════════════════════════════════
-// CALL OUR SAFE SERVER (No key exposed!)
+// IMAGE SEARCH - Wikipedia (FREE!)
 // ══════════════════════════════════════
-  
-// FREE IMAGE SEARCH - Wikipedia
 const searchImage = async (query) => {
   try {
-    const search = query.replace(/diagram|picture|image|show me|draw|of/gi,"").trim();
-    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(search)}`;
+    const clean = query
+      .replace(/diagram|picture|image|show me|draw|of|what does|look like|photo|sketch/gi,"")
+      .trim();
+    if (!clean) return null;
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(clean)}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (data.thumbnail?.source) {
-      return data.thumbnail.source;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+    return data.thumbnail?.source || null;
+  } catch { return null; }
 };
 
-// Check if user wants an image
-const wantsImage = (question) => {
-  const q = question.toLowerCase();
-  return q.includes("diagram") ||
-         q.includes("picture") ||
-         q.includes("image") ||
-         q.includes("show me") ||
-         q.includes("draw") ||
-         q.includes("photo") ||
-         q.includes("what does") ||
-         q.includes("look like");
+const wantsImage = (q) => {
+  const lower = q.toLowerCase();
+  return lower.includes("diagram") || lower.includes("picture") ||
+         lower.includes("image") || lower.includes("show me") ||
+         lower.includes("draw") || lower.includes("photo") ||
+         lower.includes("what does") || lower.includes("look like") ||
+         lower.includes("sketch");
 };
+
+// ══════════════════════════════════════
+// DETECT QUESTION TYPE
+// ══════════════════════════════════════
+const wantsExplanation = (q) => {
+  const lower = q.toLowerCase();
+  return lower.includes("explain") || lower.includes("how does") ||
+         lower.includes("tell me more") || lower.includes("elaborate") ||
+         lower.includes("in detail") || lower.includes("describe") ||
+         lower.includes("why") || lower.includes("how do") ||
+         lower.includes("what happens") || lower.includes("break it down") ||
+         lower.includes("step by step") || lower.includes("steps");
+};
+
+const wantsCode = (q) => {
+  const lower = q.toLowerCase();
+  return lower.includes("code") || lower.includes("program") ||
+         lower.includes("function") || lower.includes("write") ||
+         lower.includes("python") || lower.includes("javascript") ||
+         lower.includes("java") || lower.includes("c++") ||
+         lower.includes("algorithm") || lower.includes("syntax");
+};
+
+const wantsEssay = (q) => {
+  const lower = q.toLowerCase();
+  return lower.includes("essay") || lower.includes("write about") ||
+         lower.includes("composition") || lower.includes("article") ||
+         lower.includes("paragraph");
+};
+
+const buildPrompt = (question) => {
+  if (wantsCode(question)) {
+    return `You are BrainBoost AI for Nigerian students. 
+The student wants code. Give COMPLETE working code with brief comments.
+Use emojis. End with "✅ Copy and run this code!"
+Question: ${question}`;
+  }
+
+  if (wantsEssay(question)) {
+    return `You are BrainBoost AI for Nigerian students.
+The student wants an essay. Write a COMPLETE, STRUCTURED essay with Introduction, Body paragraphs, and Conclusion.
+Use proper academic language. Include relevant facts.
+End with "✅ This essay is unique for you - safe from plagiarism!"
+Question: ${question}`;
+  }
+
+  if (wantsExplanation(question)) {
+    return `You are BrainBoost AI for Nigerian students (WAEC, NECO, university level).
+The student wants a DETAILED explanation. Give a thorough, step-by-step response.
+Use emojis, examples, and clear headings.
+End with "✅ This explanation is accurate and unique for you!"
+Question: ${question}`;
+  }
+
+  // DEFAULT: Short, direct answer only!
+  return `You are BrainBoost AI for Nigerian students.
+Give a SHORT, DIRECT answer only. Like a dictionary definition.
+DO NOT over-explain. Just answer the question directly in 1-3 sentences maximum.
+If it's a math problem, solve it directly showing just the answer and key steps.
+Use emojis. End with "💡 Ask me to explain more if you want details!"
+Question: ${question}`;
+};
+
+// ══════════════════════════════════════
+// CALL AI SERVER
+// ══════════════════════════════════════
 const askAI = async (question) => {
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question, prompt: buildPrompt(question) })
     });
-
     const data = await response.json();
-
-    if (!response.ok) {
-      return `❌ Error: ${data.error || "Please try again!"}`;
-    }
-
+    if (!response.ok) return `❌ Error: ${data.error || "Please try again!"}`;
     return data.answer;
-
   } catch (error) {
-    return `❌ Connection error. Check internet and try again!\n\nError: ${error.message}`;
+    return `❌ Connection error. Check internet!\n\nError: ${error.message}`;
   }
 };
 
 // ══════════════════════════════════════
 // UI COMPONENTS
 // ══════════════════════════════════════
-
 function Btn({ children, onClick, variant="primary", sm, full, disabled }) {
   const base = { borderRadius:12, padding:sm?"8px 16px":"12px 24px", fontFamily:"'Outfit',sans-serif", fontWeight:700, fontSize:sm?13:14, cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.5:1, border:"none", transition:"all 0.2s", width:full?"100%":"auto", whiteSpace:"nowrap" };
   const v = {
@@ -127,6 +181,7 @@ function Btn({ children, onClick, variant="primary", sm, full, disabled }) {
     gold:{ background:"linear-gradient(135deg,#F59E0B,#d97706)", color:"#fff" },
     ghost:{ background:"rgba(124,58,237,0.1)", color:"#7C3AED", border:"1px solid rgba(124,58,237,0.4)" },
     muted:{ background:"rgba(240,244,248,0.05)", color:C.muted, border:`1px solid ${C.border}` },
+    red:{ background:"rgba(239,68,68,0.1)", color:"#ef4444", border:"1px solid rgba(239,68,68,0.3)" },
   };
   return <button disabled={disabled} onClick={onClick} style={{...base,...v[variant]}}>{children}</button>;
 }
@@ -135,9 +190,92 @@ function Tag({ children, color="#7C3AED" }) {
   return <span style={{ background:`${color}20`, color, border:`1px solid ${color}40`, borderRadius:20, padding:"3px 11px", fontSize:11, fontWeight:700 }}>{children}</span>;
 }
 
+// ══════════════════════════════════════
+// PRIVACY POLICY MODAL
+// ══════════════════════════════════════
+function PrivacyModal({ onClose }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, padding:20, overflowY:"auto" }}>
+      <div style={{ width:"100%", maxWidth:680, background:C.card, border:`1px solid ${C.border}`, borderRadius:22, padding:"32px 24px", maxHeight:"90vh", overflowY:"auto" }} className="fade-in">
+        
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>🔒</div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:800, color:C.text }}>Privacy Policy & Terms</div>
+          <div style={{ color:C.muted, fontSize:12, marginTop:4 }}>Last updated: 2025</div>
+        </div>
+
+        {[
+          {
+            icon:"📋", title:"1. What We Collect",
+            content:"We collect your name, email address, and password (encrypted) when you create an account. We also store your chat history on your device only (localStorage). We do NOT store your conversations on any external server."
+          },
+          {
+            icon:"🤖", title:"2. How AI Works",
+            content:"Your questions are sent to Google Gemini AI to generate answers. Google processes these questions according to their own privacy policy. Do not share personal, sensitive, or confidential information in your questions."
+          },
+          {
+            icon:"✅", title:"3. Acceptable Use",
+            content:"BrainBoost is for educational purposes only. You may use it for homework help, exam preparation, coding assistance, and learning new topics. This service is designed for students of all levels."
+          },
+          {
+            icon:"❌", title:"4. Prohibited Use",
+            content:"You must NOT use BrainBoost to: generate harmful, illegal, or offensive content; cheat in official examinations; harass or harm others; spread misinformation; or violate any laws. Misuse will result in immediate account termination."
+          },
+          {
+            icon:"💳", title:"5. Payments",
+            content:"Payments are processed securely by Flutterwave. We do not store your card details. Subscriptions auto-renew monthly. Cancel anytime by contacting support. No refunds for partial months."
+          },
+          {
+            icon:"🔐", title:"6. Data Security",
+            content:"Your account data is stored securely. We use industry-standard encryption. However, you are responsible for keeping your password safe. Do not share your account with others."
+          },
+          {
+            icon:"👦", title:"7. Age Policy",
+            content:"BrainBoost is suitable for all ages. Users under 13 must have parental consent. We do not knowingly collect data from children under 13 without parental permission."
+          },
+          {
+            icon:"⚖️", title:"8. Disclaimer",
+            content:"BrainBoost AI answers are for educational guidance only. Always verify important information with qualified teachers or professionals. We are not responsible for exam results or decisions made based on AI answers."
+          },
+          {
+            icon:"📞", title:"9. Contact Us",
+            content:"For questions about these terms or to report misuse, contact us at: admin@brainboost.io. We will respond within 24-48 hours."
+          },
+          {
+            icon:"🔄", title:"10. Changes",
+            content:"We may update these terms occasionally. Continued use of BrainBoost after changes means you accept the new terms. We will notify users of major changes."
+          },
+        ].map((section,i)=>(
+          <div key={i} style={{ marginBottom:20, padding:"16px", background:"rgba(124,58,237,0.05)", borderRadius:12, border:`1px solid ${C.border}` }}>
+            <div style={{ fontWeight:800, color:C.text, marginBottom:8, fontSize:14 }}>
+              {section.icon} {section.title}
+            </div>
+            <div style={{ color:C.sub, fontSize:13, lineHeight:1.7 }}>
+              {section.content}
+            </div>
+          </div>
+        ))}
+
+        <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid rgba(245,158,11,0.3)", borderRadius:12, padding:16, marginBottom:20, textAlign:"center" }}>
+          <div style={{ color:C.gold, fontWeight:700, fontSize:13 }}>
+            ⚠️ By using BrainBoost, you agree to these terms and policies.
+          </div>
+        </div>
+
+        <div style={{ textAlign:"center" }}>
+          <Btn onClick={onClose}>I Understand ✅</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════
+// PAYMENT MODAL
+// ══════════════════════════════════════
 function PaymentModal({ onClose }) {
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9999, backdropFilter:"blur(12px)", padding:20 }}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:9998, backdropFilter:"blur(12px)", padding:20 }}>
       <div style={{ width:"100%", maxWidth:660, background:C.card, border:`1px solid ${C.border}`, borderRadius:22, padding:"32px 24px" }} className="fade-in">
         <div style={{ textAlign:"center", marginBottom:24 }}>
           <div style={{ fontSize:40, marginBottom:8 }}>🧠</div>
@@ -149,7 +287,7 @@ function PaymentModal({ onClose }) {
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:800, color:C.text }}>PRO</div>
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:28, fontWeight:800, color:"#7C3AED", margin:"6px 0" }}>₦5,000</div>
             <div style={{ fontSize:11, color:C.muted, marginBottom:14 }}>/month</div>
-            {["✓ Unlimited questions","✓ Any topic","✓ No ads","✓ Priority support"].map((f,i)=>(
+            {["✓ Unlimited questions","✓ Any topic","✓ Images & diagrams","✓ Chat history saved","✓ No ads"].map((f,i)=>(
               <div key={i} style={{ fontSize:12, color:"#7C3AED", fontWeight:700, marginBottom:5, textAlign:"left" }}>{f}</div>
             ))}
             <div style={{ marginTop:14 }}><Btn onClick={()=>window.open(FLW.PRO,"_blank")} full sm>Pay ₦5,000 →</Btn></div>
@@ -159,7 +297,7 @@ function PaymentModal({ onClose }) {
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:800, color:C.text, marginTop:8 }}>PREMIUM</div>
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:28, fontWeight:800, color:C.gold, margin:"6px 0" }}>₦15,000</div>
             <div style={{ fontSize:11, color:C.muted, marginBottom:14 }}>/month</div>
-            {["✓ Everything in Pro","✓ AI Tutor","✓ Exam practice","✓ 24/7 Support"].map((f,i)=>(
+            {["✓ Everything in Pro","✓ AI Tutor mode","✓ Priority answers","✓ 24/7 Support"].map((f,i)=>(
               <div key={i} style={{ fontSize:12, color:C.gold, fontWeight:700, marginBottom:5, textAlign:"left" }}>{f}</div>
             ))}
             <div style={{ marginTop:14 }}><Btn variant="gold" onClick={()=>window.open(FLW.PREMIUM,"_blank")} full sm>Pay ₦15,000 →</Btn></div>
@@ -171,7 +309,10 @@ function PaymentModal({ onClose }) {
   );
 }
 
-function Landing({ onLogin, onSignup }) {
+// ══════════════════════════════════════
+// LANDING PAGE
+// ══════════════════════════════════════
+function Landing({ onLogin, onSignup, onPrivacy }) {
   return (
     <div style={{ width:"100%", minHeight:"100vh", background:C.bg, color:C.text, display:"flex", flexDirection:"column", fontFamily:"'Outfit',sans-serif" }}>
       <nav style={{ background:`${C.bg}E8`, backdropFilter:"blur(20px)", borderBottom:`1px solid ${C.border}`, padding:"0 20px", height:64, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100 }}>
@@ -185,32 +326,34 @@ function Landing({ onLogin, onSignup }) {
           <Btn onClick={onSignup} sm>Start Free →</Btn>
         </div>
       </nav>
+
       <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"60px 20px", textAlign:"center", position:"relative", overflow:"hidden" }}>
         <div style={{ position:"absolute", top:50, left:"10%", width:400, height:400, background:"radial-gradient(circle,rgba(124,58,237,0.12),transparent 65%)", pointerEvents:"none" }} />
         <div style={{ maxWidth:640, position:"relative", zIndex:1 }}>
-          <Tag color={C.gold}>✨ Real AI - Answers ANY Question!</Tag>
+          <Tag color={C.gold}>✨ Real AI - Short Answers + Full Explanations!</Tag>
           <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:"clamp(36px,7vw,68px)", fontWeight:800, lineHeight:1.1, margin:"22px 0 16px", background:`linear-gradient(135deg,${C.text},${C.gold})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
             Your AI Tutor<br />For ANY Subject
           </h1>
           <p style={{ fontSize:"clamp(14px,2.5vw,17px)", color:C.sub, margin:"0 0 32px", lineHeight:1.8 }}>
-            Maths (surds, trig, calculus) • Sciences • Coding<br />
-            Essays • WAEC • NECO • University • Everything!
+            Quick answers • Diagrams • Coding • Essays<br />
+            WAEC • NECO • University • Everything!
           </p>
           <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
             <Btn onClick={onSignup}>🚀 Start Free Now</Btn>
             <Btn variant="ghost" onClick={onLogin}>Log In →</Btn>
           </div>
-          <p style={{ fontSize:12, color:C.muted, marginTop:14 }}>10 free questions daily • Account saved forever</p>
+          <p style={{ fontSize:12, color:C.muted, marginTop:14 }}>10 free questions daily • Account saved forever • Real AI</p>
         </div>
       </div>
-      <div style={{ maxWidth:900, margin:"0 auto", padding:"0 20px 60px", width:"100%" }}>
+
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"0 20px 40px", width:"100%" }}>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14 }}>
           {[
-            {icon:"🔢",title:"Mathematics",text:"Surds, trig, calculus, algebra"},
-            {icon:"🔬",title:"Sciences",text:"Biology, Chemistry, Physics"},
+            {icon:"💡",title:"Quick Answers",text:"Get direct answers instantly"},
+            {icon:"📖",title:"Full Explanations",text:"Say 'explain' for details"},
+            {icon:"🖼️",title:"Diagrams",text:"Ask 'show me diagram of...'"},
             {icon:"💻",title:"Coding",text:"Python, Java, JavaScript & more"},
-            {icon:"📝",title:"Essays",text:"Any topic, properly structured"},
-            {icon:"🎓",title:"University",text:"Advanced topics & research"},
+            {icon:"📝",title:"Essays",text:"Structured, unique content"},
             {icon:"📚",title:"WAEC/NECO",text:"Exam-standard answers"},
           ].map((f,i)=>(
             <div key={i} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:20, transition:"all 0.2s" }}
@@ -223,18 +366,26 @@ function Landing({ onLogin, onSignup }) {
           ))}
         </div>
       </div>
+
       <div style={{ borderTop:`1px solid ${C.border}`, background:C.surface, padding:"20px", textAlign:"center" }}>
-        <div style={{ fontFamily:"'Playfair Display',serif", fontWeight:800, color:C.gold }}>🧠 BrainBoost</div>
-        <div style={{ fontSize:12, color:C.muted }}>© 2025 BrainBoost • Powered by Google Gemini • Payments by Flutterwave</div>
+        <div style={{ fontFamily:"'Playfair Display',serif", fontWeight:800, color:C.gold, marginBottom:8 }}>🧠 BrainBoost</div>
+        <div style={{ fontSize:12, color:C.muted, marginBottom:8 }}>© 2025 BrainBoost • Powered by Google Gemini • Payments by Flutterwave</div>
+        <span onClick={onPrivacy} style={{ fontSize:12, color:"#7C3AED", cursor:"pointer", fontWeight:700, textDecoration:"underline" }}>
+          🔒 Privacy Policy & Terms of Use
+        </span>
       </div>
     </div>
   );
 }
 
-function AuthPage({ mode, onAuth, onSwitch, onBack }) {
+// ══════════════════════════════════════
+// AUTH PAGE
+// ══════════════════════════════════════
+function AuthPage({ mode, onAuth, onSwitch, onBack, onPrivacy }) {
   const [email, setEmail] = React.useState("");
   const [pw, setPw] = React.useState("");
   const [name, setName] = React.useState("");
+  const [agreed, setAgreed] = React.useState(false);
   const [err, setErr] = React.useState("");
 
   const submit = () => {
@@ -247,12 +398,13 @@ function AuthPage({ mode, onAuth, onSwitch, onBack }) {
     if (mode==="login") {
       const saved=DB.getUser(em);
       if (!saved){setErr("❌ Account not found! Sign up first.");return;}
-      if (saved.password!==pw){setErr("❌ Wrong password!");return;}
+      if (saved.password!==pw){setErr("❌ Wrong password! Try again.");return;}
       DB.saveSession(saved); onAuth(saved);
     } else {
-      if (!name.trim()||!em||!pw){setErr("Fill all fields!");return;}
-      if (pw.length<6){setErr("Password: 6+ chars!");return;}
-      if (DB.getUser(em)){setErr("Account exists! Log in.");return;}
+      if (!name.trim()||!em||!pw){setErr("Please fill all fields!");return;}
+      if (pw.length<6){setErr("Password must be 6+ characters!");return;}
+      if (!agreed){setErr("Please agree to Privacy Policy & Terms!");return;}
+      if (DB.getUser(em)){setErr("Account exists! Please log in.");return;}
       const u={email:em,name:name.trim(),plan:"free",isOwner:false,password:pw};
       DB.saveUser(em,u); DB.saveSession(u); onAuth(u);
     }
@@ -269,12 +421,13 @@ function AuthPage({ mode, onAuth, onSwitch, onBack }) {
             {mode==="login"?"Welcome back!":"Join BrainBoost"}
           </div>
           <div style={{ color:C.muted, fontSize:13, marginTop:6 }}>
-            {mode==="login"?"✅ Account saved forever":"10 free questions daily"}
+            {mode==="login"?"✅ Your account is saved forever":"10 free questions daily • Free forever"}
           </div>
         </div>
+
         {mode==="signup"&&(
           <div style={{ marginBottom:14 }}>
-            <label style={{ fontSize:11, color:C.muted, fontWeight:700 }}>NAME</label>
+            <label style={{ fontSize:11, color:C.muted, fontWeight:700 }}>YOUR NAME</label>
             <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={inp} onKeyPress={e=>e.key==="Enter"&&submit()} />
           </div>
         )}
@@ -284,13 +437,32 @@ function AuthPage({ mode, onAuth, onSwitch, onBack }) {
         </div>
         <div style={{ marginBottom:16 }}>
           <label style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PASSWORD</label>
-          <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Min 6 chars" style={inp} onKeyPress={e=>e.key==="Enter"&&submit()} />
+          <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Min 6 characters" style={inp} onKeyPress={e=>e.key==="Enter"&&submit()} />
         </div>
+
+        {mode==="signup"&&(
+          <div style={{ marginBottom:16, display:"flex", alignItems:"flex-start", gap:10 }}>
+            <input type="checkbox" id="agree" checked={agreed} onChange={e=>setAgreed(e.target.checked)}
+              style={{ marginTop:2, cursor:"pointer", width:16, height:16, accentColor:"#7C3AED" }} />
+            <label htmlFor="agree" style={{ fontSize:12, color:C.sub, cursor:"pointer", lineHeight:1.5 }}>
+              I agree to BrainBoost's{" "}
+              <span onClick={onPrivacy} style={{ color:"#7C3AED", textDecoration:"underline", fontWeight:700 }}>
+                Privacy Policy & Terms of Use
+              </span>
+              . I will not misuse this platform.
+            </label>
+          </div>
+        )}
+
         {err&&<div style={{ color:C.gold, fontSize:12, marginBottom:14, textAlign:"center", background:`${C.gold}10`, padding:10, borderRadius:8, border:`1px solid ${C.gold}30` }}>{err}</div>}
+
         <Btn onClick={submit} full>{mode==="login"?"Log In →":"Create Account →"}</Btn>
+
         <div style={{ textAlign:"center", marginTop:16, fontSize:13, color:C.muted }}>
           {mode==="login"?"No account? ":"Have account? "}
-          <span onClick={onSwitch} style={{ color:"#7C3AED", cursor:"pointer", fontWeight:700 }}>{mode==="login"?"Sign up free":"Log in"}</span>
+          <span onClick={onSwitch} style={{ color:"#7C3AED", cursor:"pointer", fontWeight:700 }}>
+            {mode==="login"?"Sign up free":"Log in"}
+          </span>
         </div>
         <div style={{ textAlign:"center", marginTop:10 }}>
           <span onClick={onBack} style={{ fontSize:12, color:C.muted, cursor:"pointer" }}>← Back</span>
@@ -300,16 +472,23 @@ function AuthPage({ mode, onAuth, onSwitch, onBack }) {
   );
 }
 
-function Chat({ user, onLogout }) {
-  const chatKey = `bb_chat_${user.email}`;
+// ══════════════════════════════════════
+// CHAT PAGE
+// ══════════════════════════════════════
+function Chat({ user, onLogout, onPrivacy }) {
+  const chatKey = `bb_msgs_${user.email}`;
+
+  const welcomeMsg = { role:"ai", text:`Hi ${user.name}! 👋 I'm BrainBoost AI 🧠\n\nI give SHORT answers by default.\nAdd "explain" or "in detail" for full explanations!\n\nExamples:\n❓ "What is physics?" → Short definition\n📖 "Explain photosynthesis" → Full detail\n🖼️ "Show me diagram of rabbit" → Image + info\n💻 "Write Python code for..." → Full code\n📝 "Essay on climate change" → Full essay\n🔢 "What is sin(45°)?" → Quick answer\n\nAsk me anything! 🚀` };
 
   const [messages, setMessages] = React.useState(()=>{
-    try {
-      const saved = localStorage.getItem(chatKey);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [{ role:"ai", text:`Hi ${user.name}! 👋\n\nI'm BrainBoost AI 🧠 Ask me ANYTHING!\n\n🔢 "Simplify √50 + √32"\n📐 "What is sin(45°)?"\n⚗️ "Balance H₂ + O₂ → H₂O"\n💻 "Python code for prime numbers"\n📝 "Essay on climate change"\n🔬 "Explain mitosis"\n🌍 "Causes of World War 2"\n\nAny subject, any topic, any level! 🚀` }];
+    const saved = DB.getMessages(user.email);
+    return saved || [welcomeMsg];
   });
+
+  React.useEffect(()=>{
+    DB.saveMessages(user.email, messages);
+  }, [messages]);
+
   const [input, setInput] = React.useState("");
   const [dailyUsed, setDailyUsed] = React.useState(()=>DB.getDailyUsed(user.email));
   const [loading, setLoading] = React.useState(false);
@@ -323,64 +502,51 @@ function Chat({ user, onLogout }) {
   React.useEffect(()=>{ messagesEnd.current?.scrollIntoView({behavior:"smooth"}); },[messages,loading]);
 
   const handleSend = async () => {
-  if (!input.trim() || loading) return;
-  if (!isPro && remaining <= 0) { setShowPayment(true); return; }
-
-  const userMsg = input;
-  setMessages(prev=>[...prev, { role:"user", text:userMsg }]);
-  setInput("");
-  setLoading(true);
-
-  // Check if user wants image
-  let imageUrl = null;
-  if (wantsImage(userMsg)) {
-    imageUrl = await searchImage(userMsg);
-  }
-
-  const aiResponse = await askAI(userMsg);
-
-  // Add message with optional image
-  setMessages(prev=>[...prev, {
-    role:"ai",
-    text: aiResponse,
-    image: imageUrl
-  }]);
-
-  const n = DB.incDailyUsed(user.email);
-  setDailyUsed(n);
-  setLoading(false);
-};
     if (!input.trim()||loading) return;
     if (!isPro&&remaining<=0){setShowPayment(true);return;}
-    const userMsg=input;
+
+    const userMsg = input;
     setMessages(prev=>[...prev,{role:"user",text:userMsg}]);
     setInput("");
     setLoading(true);
+
+    // Check if user wants image
+    let imageUrl = null;
+    if (wantsImage(userMsg)) {
+      imageUrl = await searchImage(userMsg);
+    }
+
     const aiResponse = await askAI(userMsg);
-    setMessages(prev=>[...prev,{role:"ai",text:aiResponse}]);
+    setMessages(prev=>[...prev,{role:"ai",text:aiResponse,image:imageUrl}]);
     const n=DB.incDailyUsed(user.email);
     setDailyUsed(n);
     setLoading(false);
   };
 
+  const clearChat = () => {
+    DB.saveMessages(user.email, [welcomeMsg]);
+    setMessages([welcomeMsg]);
+  };
+
   return (
     <div style={{ width:"100%", height:"100vh", background:C.bg, display:"flex", flexDirection:"column", color:C.text, fontFamily:"'Outfit',sans-serif" }}>
       {showPayment&&<PaymentModal onClose={()=>setShowPayment(false)} />}
+
+      {/* NAV */}
       <nav style={{ background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 16px", height:58, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontFamily:"'Playfair Display',serif", fontSize:20, fontWeight:800, color:"#7C3AED" }}>🧠 BrainBoost</span>
+          <span style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:800, color:"#7C3AED" }}>🧠 BrainBoost</span>
           <Tag color={user.isOwner?C.gold:isPro?C.teal:C.muted}>{user.isOwner?"OWNER":isPro?"PRO":"FREE"}</Tag>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           {!isPro&&<div onClick={()=>setShowPayment(true)} style={{ fontSize:12, color:remaining<=2?C.gold:C.sub, fontWeight:700, padding:"5px 10px", background:remaining<=2?`${C.gold}15`:"rgba(124,58,237,0.08)", borderRadius:8, cursor:"pointer" }}>{remaining} left</div>}
-          {!isPro&&<Btn variant="ghost" sm onClick={()=>setShowPayment(true)}>Upgrade 💎</Btn>}
-          <Btn variant="muted" sm onClick={()=>{
-  localStorage.removeItem(chatKey);
-  setMessages([{ role:"ai", text:`Hi ${user.name}! Chat cleared! Ask me anything 🧠` }]);
-}}>Clear</Btn>
-<Btn variant="muted" sm onClick={onLogout}>Out</Btn>
+          {!isPro&&<Btn variant="ghost" sm onClick={()=>setShowPayment(true)}>⬆️ Pro</Btn>}
+          <Btn variant="muted" sm onClick={clearChat}>🗑️</Btn>
+          <Btn variant="muted" sm onClick={onLogout}>Out</Btn>
         </div>
       </nav>
+
+      {/* MESSAGES */}
       <div style={{ flex:1, overflowY:"auto", padding:"16px", maxWidth:860, margin:"0 auto", width:"100%" }}>
         {messages.map((msg,i)=>(
           <div key={i} style={{ marginBottom:16 }} className="fade-in">
@@ -392,27 +558,21 @@ function Chat({ user, onLogout }) {
               <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
                 <div style={{ width:34, height:34, background:"linear-gradient(135deg,#7C3AED,#F59E0B)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>🧠</div>
                 <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"4px 16px 16px 16px", padding:"12px 16px", maxWidth:"82%", fontSize:14, lineHeight:1.75, whiteSpace:"pre-wrap", wordWrap:"break-word", color:C.text }}>
-  {msg.image && (
-    <div style={{ marginBottom:12 }}>
-      <img 
-        src={msg.image} 
-        alt="diagram"
-        style={{ 
-          width:"100%", 
-          maxWidth:300, 
-          borderRadius:12, 
-          border:`1px solid ${C.border}`,
-          display:"block"
-        }}
-        onError={e=>e.target.style.display="none"}
-      />
-    </div>
-  )}
-  {msg.text}
-</div>              </div>
+                  {msg.image&&(
+                    <div style={{ marginBottom:10 }}>
+                      <img src={msg.image} alt="diagram"
+                        style={{ width:"100%", maxWidth:280, borderRadius:10, border:`1px solid ${C.border}`, display:"block" }}
+                        onError={e=>e.target.style.display="none"} />
+                      <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>📸 Image from Wikipedia</div>
+                    </div>
+                  )}
+                  {msg.text}
+                </div>
+              </div>
             )}
           </div>
         ))}
+
         {loading&&(
           <div style={{ display:"flex", gap:10, alignItems:"flex-start", marginBottom:16 }}>
             <div style={{ width:34, height:34, background:"linear-gradient(135deg,#7C3AED,#F59E0B)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🧠</div>
@@ -425,7 +585,9 @@ function Chat({ user, onLogout }) {
         )}
         <div ref={messagesEnd} />
       </div>
-      <div style={{ padding:"0 16px 10px", maxWidth:860, margin:"0 auto", width:"100%" }}>
+
+      {/* REVVO AD */}
+      <div style={{ padding:"0 16px 8px", maxWidth:860, margin:"0 auto", width:"100%" }}>
         <div style={{ background:"linear-gradient(135deg,rgba(124,58,237,0.08),rgba(245,158,11,0.08))", border:"1px solid rgba(245,158,11,0.25)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ fontSize:18 }}>💰</div>
           <div style={{ flex:1 }}>
@@ -435,28 +597,47 @@ function Chat({ user, onLogout }) {
           <Btn variant="ghost" sm onClick={()=>window.open("https://finance-dashboard--moshoodroqeeb.replit.app","_blank")}>Try →</Btn>
         </div>
       </div>
+
+      {/* QUICK SUGGESTIONS */}
+      <div style={{ padding:"0 16px 8px", maxWidth:860, margin:"0 auto", width:"100%", display:"flex", gap:8, flexWrap:"wrap" }}>
+        {["Explain photosynthesis","Show me diagram of heart","Write Python code","Essay on climate change"].map((s,i)=>(
+          <div key={i} onClick={()=>setInput(s)}
+            style={{ fontSize:11, color:C.sub, background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"5px 12px", cursor:"pointer", transition:"all 0.2s" }}
+            onMouseEnter={e=>e.currentTarget.style.borderColor="#7C3AED"}
+            onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+            {s}
+          </div>
+        ))}
+      </div>
+
+      {/* INPUT */}
       <div style={{ borderTop:`1px solid ${C.border}`, background:C.surface, padding:"12px 16px", flexShrink:0 }}>
         <div style={{ maxWidth:860, margin:"0 auto", width:"100%", display:"flex", gap:10, alignItems:"center" }}>
           <input type="text" value={input} onChange={e=>setInput(e.target.value)} onKeyPress={e=>e.key==="Enter"&&handleSend()}
-            placeholder={!isPro&&remaining===0?"Upgrade to continue...":"Ask anything - maths, science, coding, essays..."}
+            placeholder={!isPro&&remaining===0?"Upgrade to continue...":"Ask anything or say 'explain...' for details"}
             disabled={loading||(!isPro&&remaining<=0)}
             style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"12px 16px", color:C.text, fontFamily:"'Outfit',sans-serif", fontSize:14, outline:"none", opacity:loading||(!isPro&&remaining<=0)?0.6:1 }} />
           <button onClick={handleSend} disabled={loading||!input.trim()||(!isPro&&remaining<=0)}
             style={{ width:46, height:46, background:"linear-gradient(135deg,#7C3AED,#a855f7)", border:"none", borderRadius:12, cursor:"pointer", fontSize:20, display:"flex", alignItems:"center", justifyContent:"center", opacity:loading||!input.trim()?0.5:1, flexShrink:0, color:"#fff" }}>→</button>
         </div>
-        {!isPro&&<div style={{ fontSize:11, color:C.muted, textAlign:"center", marginTop:8 }}>
-          <span onClick={()=>setShowPayment(true)} style={{ color:"#7C3AED", cursor:"pointer", fontWeight:700 }}>
-            {remaining===0?"Daily limit • Upgrade ₦5,000/month":`${remaining} left today • Upgrade for unlimited`}
-          </span>
-        </div>}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6, maxWidth:860, margin:"6px auto 0" }}>
+          {!isPro&&<span onClick={()=>setShowPayment(true)} style={{ fontSize:11, color:"#7C3AED", cursor:"pointer", fontWeight:700 }}>
+            {remaining===0?"Daily limit • Upgrade ₦5,000/month":`${remaining} questions left • Upgrade for unlimited`}
+          </span>}
+          <span onClick={onPrivacy} style={{ fontSize:11, color:C.muted, cursor:"pointer", marginLeft:"auto" }}>🔒 Privacy Policy</span>
+        </div>
       </div>
     </div>
   );
 }
 
+// ══════════════════════════════════════
+// ROOT APP
+// ══════════════════════════════════════
 function App() {
   const [screen, setScreen] = React.useState("loading");
   const [user, setUser] = React.useState(null);
+  const [showPrivacy, setShowPrivacy] = React.useState(false);
 
   React.useEffect(()=>{
     const session=DB.getSession();
@@ -467,19 +648,23 @@ function App() {
   const login=u=>{setUser(u);setScreen("chat");};
   const logout=()=>{DB.clearSession();setUser(null);setScreen("landing");};
 
-  if (screen==="loading") return (
-    <div style={{ width:"100%", height:"100vh", background:C.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ textAlign:"center" }}>
-        <div style={{ fontSize:50, marginBottom:16 }}>🧠</div>
-        <div style={{ color:C.purple, fontFamily:"'Playfair Display',serif", fontSize:20, fontWeight:800 }}>BrainBoost</div>
-      </div>
-    </div>
+  return (
+    <>
+      {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)} />}
+      {screen==="loading"&&(
+        <div style={{ width:"100%", height:"100vh", background:C.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:50, marginBottom:16 }}>🧠</div>
+            <div style={{ color:"#7C3AED", fontFamily:"'Playfair Display',serif", fontSize:20, fontWeight:800 }}>BrainBoost</div>
+          </div>
+        </div>
+      )}
+      {screen==="landing"&&<Landing onLogin={()=>setScreen("login")} onSignup={()=>setScreen("signup")} onPrivacy={()=>setShowPrivacy(true)} />}
+      {screen==="login"&&<AuthPage mode="login" onAuth={login} onSwitch={()=>setScreen("signup")} onBack={()=>setScreen("landing")} onPrivacy={()=>setShowPrivacy(true)} />}
+      {screen==="signup"&&<AuthPage mode="signup" onAuth={login} onSwitch={()=>setScreen("login")} onBack={()=>setScreen("landing")} onPrivacy={()=>setShowPrivacy(true)} />}
+      {screen==="chat"&&<Chat user={user} onLogout={logout} onPrivacy={()=>setShowPrivacy(true)} />}
+    </>
   );
-
-  if (screen==="landing") return <Landing onLogin={()=>setScreen("login")} onSignup={()=>setScreen("signup")} />;
-  if (screen==="login") return <AuthPage mode="login" onAuth={login} onSwitch={()=>setScreen("signup")} onBack={()=>setScreen("landing")} />;
-  if (screen==="signup") return <AuthPage mode="signup" onAuth={login} onSwitch={()=>setScreen("login")} onBack={()=>setScreen("landing")} />;
-  if (screen==="chat") return <Chat user={user} onLogout={logout} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
