@@ -75,10 +75,19 @@ const searchImage = async (query) => {
       .replace(/diagram|picture|image|show me|draw|of|what does|look like|photo|sketch/gi,"")
       .trim();
     if (!clean) return null;
-    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(clean)}`;
+
+    // Wikipedia API with CORS enabled (origin=*)
+    const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(clean)}&prop=pageimages&format=json&pithumbsize=400&origin=*`;
+    
     const res = await fetch(url);
     const data = await res.json();
-    return data.thumbnail?.source || null;
+    
+    const pages = data.query?.pages;
+    if (!pages) return null;
+    
+    const page = Object.values(pages)[0];
+    return page?.thumbnail?.source || null;
+
   } catch { return null; }
 };
 
@@ -121,6 +130,23 @@ const wantsEssay = (q) => {
 };
 
 const buildPrompt = (question) => {
+
+  // NEW: If user wants image, describe the subject instead
+  if (wantsImage(question)) {
+    const subject = question
+      .replace(/diagram|picture|image|show me|draw|of|what does|look like|photo|sketch/gi,"")
+      .trim();
+    return `You are BrainBoost AI for Nigerian students.
+The student wants to learn about: ${subject}
+
+Give a SHORT description of ${subject} in 2-3 sentences.
+Mention key features they would see in a diagram.
+Do NOT say anything about images or diagrams.
+Just describe it simply with emojis.
+End with "💡 Type 'explain ${subject}' for more details!"`;
+  }
+
+  if (wantsCode(question)) {
   if (wantsCode(question)) {
     return `You are BrainBoost AI for Nigerian students. 
 The student wants code. Give COMPLETE working code with brief comments.
